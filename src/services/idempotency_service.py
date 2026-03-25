@@ -93,6 +93,7 @@ class IdempotencyService:
         self,
         workspace_id: uuid.UUID,
         key: str,
+        action_type: str,
         response_payload: dict[str, Any],
     ) -> None:
         now = datetime.now(UTC)
@@ -100,6 +101,7 @@ class IdempotencyService:
         stmt = select(IdempotencyKey).where(
             IdempotencyKey.workspace_id == workspace_id,
             IdempotencyKey.key == key,
+            IdempotencyKey.action_type == action_type,
         )
 
         result = await self.session.execute(stmt)
@@ -113,7 +115,38 @@ class IdempotencyService:
             logger.info(
                 "idempotency_key_completed",
                 key=key,
+                action_type=action_type,
                 status="completed",
+            )
+
+    async def fail(
+        self,
+        workspace_id: uuid.UUID,
+        key: str,
+        action_type: str,
+    ) -> None:
+        """Delete a stuck-in-processing idempotency key so the caller can retry with the same key.
+
+        Called from outer exception handlers when an unexpected error prevents normal completion.
+        Deleting (rather than marking failed) is intentional: it allows the client to retry
+        the exact same idempotency key without waiting for TTL expiry.
+        """
+        stmt = select(IdempotencyKey).where(
+            IdempotencyKey.workspace_id == workspace_id,
+            IdempotencyKey.key == key,
+            IdempotencyKey.action_type == action_type,
+        )
+
+        result = await self.session.execute(stmt)
+        idempotency_key = result.scalar_one_or_none()
+
+        if idempotency_key:
+            await self.session.delete(idempotency_key)
+            await self.session.flush()
+            logger.info(
+                "idempotency_key_released_on_failure",
+                key=key,
+                action_type=action_type,
             )
 
     async def cleanup_expired(self) -> int:

@@ -76,17 +76,13 @@ class ActionService:
     async def _attempt_delivery(
         self,
         client: httpx.AsyncClient,
-        destination: str,
-        payload: dict[str, Any],
+        url: str,
+        body: dict[str, Any],
     ) -> bool:
         """Execute a single webhook delivery attempt. Returns True on success, False on 4xx."""
         response = await client.post(
-            settings.alert_webhook_url,
-            json={
-                "destination": destination,
-                "payload": payload,
-                "timestamp": datetime.now(UTC).isoformat(),
-            },
+            url,
+            json=body,
             headers={"Content-Type": "application/json"},
         )
         if 400 <= response.status_code < 500:
@@ -94,7 +90,7 @@ class ActionService:
             logger.warning(
                 "webhook_delivery_client_error",
                 status_code=response.status_code,
-                destination=destination,
+                url=url,
             )
             return False
         return response.status_code < 400
@@ -104,19 +100,29 @@ class ActionService:
         destination: str,
         payload: dict[str, Any],
     ) -> bool:
-        if not settings.alert_webhook_url:
-            logger.info("webhook_mock_delivery", destination=destination, payload=payload)
-            return True
+        if settings.alert_webhook_url:
+            # Relay mode: route through a configured relay/proxy endpoint.
+            # The relay is responsible for forwarding to the final destination.
+            url = settings.alert_webhook_url
+            body: dict[str, Any] = {
+                "destination": destination,
+                "payload": payload,
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
+        else:
+            # Direct mode: POST the payload straight to the destination URL.
+            url = destination
+            body = payload
 
         last_error: Exception | None = None
 
         for attempt in range(1, settings.alert_retry_max_attempts + 1):
             try:
                 if self._http_client is not None:
-                    result = await self._attempt_delivery(self._http_client, destination, payload)
+                    result = await self._attempt_delivery(self._http_client, url, body)
                 else:
                     async with httpx.AsyncClient(timeout=30.0) as client:
-                        result = await self._attempt_delivery(client, destination, payload)
+                        result = await self._attempt_delivery(client, url, body)
 
                 if result:
                     if attempt > 1:

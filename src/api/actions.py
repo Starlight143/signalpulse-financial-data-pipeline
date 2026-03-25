@@ -146,6 +146,7 @@ async def dispatch_alert(
             await idempotency_service.complete(
                 workspace_id=workspace_id,
                 key=request.idempotency_key,
+                action_type="alert_dispatch",
                 response_payload={"status": "denied", "verdict": exc.verdict},
             )
             logger.warning(
@@ -166,6 +167,7 @@ async def dispatch_alert(
             await idempotency_service.complete(
                 workspace_id=workspace_id,
                 key=request.idempotency_key,
+                action_type="alert_dispatch",
                 response_payload={"status": "deferred"},
             )
             logger.info(
@@ -196,6 +198,7 @@ async def dispatch_alert(
             await idempotency_service.complete(
                 workspace_id=workspace_id,
                 key=request.idempotency_key,
+                action_type="alert_dispatch",
                 response_payload={"status": "denied", "verdict": stage0_response.verdict},
             )
             return ActionResponse(
@@ -221,6 +224,7 @@ async def dispatch_alert(
             await idempotency_service.complete(
                 workspace_id=workspace_id,
                 key=request.idempotency_key,
+                action_type="alert_dispatch",
                 response_payload={"status": "failed", "action_id": str(alert.id)},
             )
             logger.warning(
@@ -246,6 +250,7 @@ async def dispatch_alert(
         await idempotency_service.complete(
             workspace_id=workspace_id,
             key=request.idempotency_key,
+            action_type="alert_dispatch",
             response_payload={
                 "status": "success",
                 "action_id": str(alert.id),
@@ -271,6 +276,19 @@ async def dispatch_alert(
 
     except Exception as e:
         logger.error("alert_dispatch_failed", error=str(e), exc_info=True)
+        # Release the processing lock so the caller can retry with the same key.
+        try:
+            await idempotency_service.fail(
+                workspace_id=workspace_id,
+                key=request.idempotency_key,
+                action_type="alert_dispatch",
+            )
+        except Exception:
+            logger.warning(
+                "idempotency_fail_cleanup_error",
+                key=request.idempotency_key,
+                action_type="alert_dispatch",
+            )
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -363,6 +381,7 @@ async def create_execution_intent(
             await idempotency_service.complete(
                 workspace_id=workspace_id,
                 key=request.idempotency_key,
+                action_type="execution_intent",
                 response_payload={"status": "denied", "intent_id": str(intent.id)},
             )
             logger.warning(
@@ -393,6 +412,7 @@ async def create_execution_intent(
             await idempotency_service.complete(
                 workspace_id=workspace_id,
                 key=request.idempotency_key,
+                action_type="execution_intent",
                 response_payload={"status": "deferred", "intent_id": str(intent.id)},
             )
             return ExecutionIntentResponse.model_validate(intent)
@@ -442,6 +462,7 @@ async def create_execution_intent(
         await idempotency_service.complete(
             workspace_id=workspace_id,
             key=request.idempotency_key,
+            action_type="execution_intent",
             response_payload={
                 "status": status,
                 "intent_id": str(intent.id),
@@ -461,4 +482,17 @@ async def create_execution_intent(
 
     except Exception as e:
         logger.error("execution_intent_failed", error=str(e), exc_info=True)
+        # Release the processing lock so the caller can retry with the same key.
+        try:
+            await idempotency_service.fail(
+                workspace_id=workspace_id,
+                key=request.idempotency_key,
+                action_type="execution_intent",
+            )
+        except Exception:
+            logger.warning(
+                "idempotency_fail_cleanup_error",
+                key=request.idempotency_key,
+                action_type="execution_intent",
+            )
         raise HTTPException(status_code=500, detail="Internal server error")

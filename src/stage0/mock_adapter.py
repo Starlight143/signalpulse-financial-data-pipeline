@@ -77,7 +77,7 @@ class MockStage0Adapter(Stage0Adapter):
                 return "NO_GO", "DENY", issues
 
             if ctx.approval_status == "approved" and not ctx.approved_by:
-                issues.append(Stage0Issue(code="APPROVAL_TIMESTAMP_MISSING"))
+                issues.append(Stage0Issue(code="APPROVED_BY_MISSING"))
                 return "DEFER", "DEFER", issues
 
         if risk_score >= self.risk_threshold:
