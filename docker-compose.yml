@@ -1,0 +1,95 @@
+# =============================================================================
+# Docker Compose Configuration
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL Database
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: signalpulse-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: signalpulse
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d signalpulse"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - signalpulse-network
+
+  # ---------------------------------------------------------------------------
+  # API Server
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: signalpulse-api
+    environment:
+      - APP_ENV=development
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/signalpulse
+      - STAGE0_BASE_URL=${STAGE0_BASE_URL:-https://api.signalpulse.org}
+      - STAGE0_API_KEY=${STAGE0_API_KEY:-}
+      - STAGE0_MOCK_MODE=${STAGE0_MOCK_MODE:-true}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-dev-internal-key-change-in-prod}
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-prod}
+      - LOG_LEVEL=INFO
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - signalpulse-network
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Ingestion Worker (optional - run with: docker compose --profile worker up)
+  # ---------------------------------------------------------------------------
+  ingestion-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: signalpulse-ingestion
+    environment:
+      - APP_ENV=development
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/signalpulse
+      - STAGE0_BASE_URL=${STAGE0_BASE_URL:-https://api.signalpulse.org}
+      - STAGE0_API_KEY=${STAGE0_API_KEY:-}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-dev-internal-key-change-in-prod}
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-prod}
+      - INGESTION_INTERVAL_SECONDS=${INGESTION_INTERVAL_SECONDS:-300}
+      - SUPPORTED_SYMBOLS=${SUPPORTED_SYMBOLS:-BTCUSDT,ETHUSDT,SOLUSDT}
+    command: ["python", "-m", "src.ingestion.worker"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    networks:
+      - signalpulse-network
+    restart: unless-stopped
+    profiles:
+      - worker
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  signalpulse-network:
+    driver: bridge
