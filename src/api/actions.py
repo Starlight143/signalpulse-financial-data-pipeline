@@ -101,7 +101,12 @@ async def dispatch_alert(
         action_type="alert_dispatch",
     )
 
-    if existing:
+    if existing is not None:
+        if existing.get("status") == "processing":
+            raise HTTPException(
+                status_code=409,
+                detail="A request with this idempotency key is already being processed",
+            )
         raw_id = existing.get("action_id")
         return ActionResponse(
             success=True,
@@ -308,7 +313,12 @@ async def create_execution_intent(
         action_type="execution_intent",
     )
 
-    if existing:
+    if existing is not None:
+        if existing.get("status") == "processing":
+            raise HTTPException(
+                status_code=409,
+                detail="A request with this idempotency key is already being processed",
+            )
         intent_id = existing.get("intent_id")
         if intent_id:
             existing_intent = await session.get(ExecutionIntent, uuid.UUID(intent_id))
